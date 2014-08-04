@@ -1,0 +1,212 @@
+turtles-own [group speed initSpeed flight EP_knowledge chosenEP direction rescue_attempt]
+patches-own [EvacuationPoint]
+globals [saved safeSpot time survivors]
+
+;;Environment setup
+to mapa
+  ca
+  import-pcolors "map.png"
+  crt citizens [set color black
+          setxy random-xcor random-ycor
+          set group random group_count
+          set speed (random-normal 0.14 0.015) * 5 
+          set initSpeed speed
+          set EP_knowledge random-poisson av_EP_knowledge 
+          if EP_knowledge > 10
+          [set EP_knowledge 10]
+          set direction heading
+        ]
+  
+ 
+  ask turtles [
+    move-to one-of patches with [pcolor = 67.4 and not any? other turtles-here] 
+  ]
+  
+  
+  let safePlace (list (patch -80 38) (patch -63 33) (patch -62 62) 
+                              (patch -30 77) (patch -7 86) (patch 5 52)
+                              (patch 17 45) (patch 30 51) (patch 60 57) (patch 78 20))
+  
+  foreach safePlace [ask ?[set pcolor white
+                                   set EvacuationPoint 1]]
+  
+  set safeSpot patches with [EvacuationPoint = 1]
+  
+  ;;main street, business center where should be more people than in other places
+  ask n-of (count turtles * 0.4) turtles [
+     move-to one-of patches with [pcolor = 67.4 and distance patch -18 5 < 35 and not any? other turtles-here]
+  ]
+  
+  ask n-of (count turtles * rescuers) turtles [
+    set EP_knowledge 10
+  ]
+  
+  reset-ticks 
+end
+
+;;Main loop
+to go
+  ask turtles [
+   
+    look_for_a_safe_spot
+    form_a_group
+    run_away
+    rescue
+    go_arround
+    move
+    stop_here
+    die_here
+ 
+ ]
+  
+  tsunami
+  tick
+  
+  if count turtles = 0
+     [set time ticks * 5 
+      set survivors saved / citizens * 100
+      stop]
+end
+
+
+
+;; Agents look fot the closest one of the evacuation points that they know
+to look_for_a_safe_spot
+  
+   set heading direction
+   let my_EP one-of patches in-cone 400 1 with [EvacuationPoint = 1]
+   let my_safeSpot min-one-of n-of EP_knowledge safeSpot [distance myself] 
+   let other_one one-of other turtles in-cone 5 360
+ 
+ 
+      
+  if (my_safeSpot != nobody and flight = 0 and chosenEP = 0) 
+  or ( my_safeSpot != nobody and chosenEP = 1 and my_EP != nobody and distance my_safeSpot < distance my_EP)
+    [face my_safeSpot
+      set chosenEP 1
+      set direction heading]
+    
+  if EP_knowledge = 0 and other_one != nobody and not any? other turtles-here
+     [face other_one
+      set direction [heading] of other_one]
+    
+end
+
+
+
+;; Agents may try to form groups. In this case they obtain knowledge about EP locations from the best
+;; informed gropu member 
+to form_a_group
+  
+  if (cooperation = true) and (count other turtles in-cone 1 360) < min_group_members and [pcolor] of patch-here > 64
+      [let groupCenter max-one-of other turtles in-cone 5 120 [count other turtles in-cone 1 360]
+       let my_knowledge EP_knowledge
+    
+          if groupCenter != nobody 
+             [face groupCenter
+              ask groupCenter [set color blue
+              set speed mean [speed] of turtles in-cone 1 360
+              let max_knowledge max-one-of turtles in-cone 1 360 [EP_knowledge]
+                   if my_knowledge < [EP_knowledge] of max_knowledge
+                      [set EP_knowledge [EP_knowledge] of max_knowledge]
+                               ]
+            ]
+       ]
+  
+  
+  
+end
+
+
+to run_away
+  
+  let dryPatch one-of patches in-cone 1 360 with [pcolor < 75]
+  
+  ifelse one-of patches in-cone 1 360 != nobody and [pcolor] of one-of patches in-cone 3 120 = 95.1 and dryPatch != nobody
+  [ face dryPatch
+    set flight 1
+    set speed speed + 0.2
+  ]
+  [set flight 0]
+   
+  
+end
+
+
+;; Agents may try to rescue other ones that are related with them (relation is determined by group number difference)
+to rescue
+   
+   let my_direction direction
+   lt 180
+   let my_group group
+   let my_knowledge EP_knowledge
+   let my_speed speed
+   let friend one-of turtles in-cone 1.5 180 with [abs(group - my_group) < max_group_diff and (distance myself > 0.6)] 
+   
+   
+  ifelse friend != nobody and [rescue_attempt] of friend = 0
+     [face friend
+       set color pink
+       
+          ifelse [EP_knowledge] of friend > my_knowledge
+              [set EP_knowledge [EP_knowledge] of friend]
+              [ask friend [set EP_knowledge my_knowledge]
+               set rescue_attempt 1 
+               set direction my_direction
+              ]
+    
+          ifelse [speed] of friend > my_speed
+              [set speed [speed] of friend]
+              [ask friend [set speed my_speed]]
+    ]
+    [rt 180
+      set color black]
+  
+end
+
+
+;; Agents turn around when they reach inacessible terrain
+to go_arround
+  
+ if (patch-ahead 2 != nobody and [pcolor] of patch-ahead 2 = 74.4) or patch-ahead 2 = nobody
+  [lt 180
+    set direction heading]
+   
+  
+end
+
+to move
+  
+  fd speed
+  
+end
+
+
+
+to stop_here
+    if [pcolor] of patch-here < 27
+       [set saved saved + 1
+        die] 
+end
+
+
+to die_here
+  if [pcolor] of patch-here = 95.1
+     [die]
+end
+
+
+
+to tsunami
+  
+ if ticks > 180
+    [ask patches with [pcolor = 95.1]
+    [ask patches in-radius 3.5 with [pcolor > 64] [set pcolor 95.1] ]
+    ]
+  
+  if (count patches with [pcolor > 64 and pcolor < 70]) = 0 and random-float 0.9 < 0.3
+      [ask patches with [pcolor = 95.1]
+      [ask neighbors with [pcolor > 40] [set pcolor 95.1] ]
+      ]
+  
+end
